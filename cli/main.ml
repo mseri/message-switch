@@ -16,17 +16,18 @@
 open Message_switch
 open Protocol
 open Protocol_unix
+open Rresult
 
 let project_url = "http://github.com/djs55/message_switch"
 
 let (>>|=) m f = match m with
-  | `Error e ->
+  | Error e ->
     let b = Buffer.create 16 in
     let fmt = Format.formatter_of_buffer b in
     Client.pp_error fmt e;
     Format.pp_print_flush fmt ();
-    `Error (false, (Buffer.contents b))
-  | `Ok x -> f x
+    Error (false, (Buffer.contents b))
+  | Ok x -> f x
 
 open Cmdliner
 
@@ -69,6 +70,24 @@ let help = [
   `P "Use `$(mname) $(i,COMMAND) --help' for help on a single command."; `Noblank;
   `S "BUGS"; `P (Printf.sprintf "Check bug reports at %s" project_url);
 ]
+
+(* Horrible helpers *)
+
+let translate1 f x = match f x with
+  | Ok x -> `Ok x
+  | Error y -> `Error y
+
+let translate2 f x y = match f x y with
+  | Ok x -> `Ok x
+  | Error y -> `Error y
+
+let translate3 f x y z = match f x y z with
+  | Ok x -> `Ok x
+  | Error y -> `Error y
+
+let translate5 f x y z x' y' = match f x y z x' y' with
+  | Ok x -> `Ok x
+  | Error y -> `Error y
 
 (* Commands *)
 
@@ -203,7 +222,7 @@ let diagnostics common_opts =
       print_endline "Temporary queues containing replies:";
       List.iter queue to_show
     end;
-    `Ok ()
+    Ok ()
 
 let list common_opts prefix all =
   Client.connect ~switch:common_opts.Common.path ()
@@ -211,7 +230,7 @@ let list common_opts prefix all =
   Client.list ~t ~prefix ~filter:(if all then `All else `Alive) ()
   >>|= fun all ->
   List.iter print_endline all;
-  `Ok ()
+  Ok ()
 
 let ack common_opts name id = match name, id with
   | Some name, Some id ->
@@ -219,19 +238,19 @@ let ack common_opts name id = match name, id with
     >>|= fun t ->
     Client.ack ~t ~message:(name,id) ()
     >>|= fun _ ->
-    `Ok ()
+    Ok ()
   | _, _ ->
-    `Error(true, "Please supply both a queue name and message ID")
+    Error(true, "Please supply both a queue name and message ID")
 
 let destroy common_opts name = match name with
   | None ->
-    `Error(true, "Please supply a queue name")
+    Error(true, "Please supply a queue name")
   | Some name ->
     Client.connect ~switch:common_opts.Common.path ()
     >>|= fun t ->
     Client.destroy ~t ~queue:name ()
     >>|= fun _ ->
-    `Ok ()
+    Ok ()
 
 module Opt = struct
   let iter f = function
@@ -299,7 +318,7 @@ let mscgen common_opts =
   Printf.printf "%s;\n" (String.concat "," (List.map quote (StringSet.((elements (union(union inputs outputs) queues))))));
   List.iter print_event trace.Out.events;
   Printf.printf "}\n";
-  `Ok ()
+  Ok ()
 
 let tail common_opts follow =
   Client.connect ~switch:common_opts.Common.path ()
@@ -322,8 +341,8 @@ let tail common_opts follow =
   let finished = ref false in
   while not(!finished) do
     match Client.trace ~t:c ~from:!from ~timeout () with
-    | `Error _ -> failwith "Trace failed"
-    | `Ok trace ->
+    | Error _ -> failwith "Trace failed"
+    | Ok trace ->
       let endpoint = function
         | None -> "-"
         | Some x -> x in
@@ -357,7 +376,7 @@ let tail common_opts follow =
           | (id, _) :: ms -> Int64.add 1L (List.fold_left max id (List.map fst ms))
         end;
   done;
-  `Ok ()
+  Ok ()
 
 let diagnostics_cmd =
   let doc = "dump the current switch state" in
@@ -365,7 +384,7 @@ let diagnostics_cmd =
     `S "DESCRIPTION";
     `P "Dumps the current switch state for diagnostic purposes.";
   ] @ help in
-  Term.(ret(pure diagnostics $ common_options_t)),
+  Term.(ret(pure (translate1 diagnostics) $ common_options_t)),
   Term.info "diagnostics" ~sdocs:_common_options ~doc ~man
 
 let list_cmd =
@@ -380,7 +399,7 @@ let list_cmd =
   let all =
     let doc = "List all queues, even if no-one is listening." in
     Arg.(value & flag & info [ "all" ] ~docv:"ALL" ~doc) in
-  Term.(ret(pure list $ common_options_t $ prefix $ all)),
+  Term.(ret(pure (translate3 list) $ common_options_t $ prefix $ all)),
   Term.info "list" ~sdocs:_common_options ~doc ~man
 
 let tail_cmd =
@@ -392,7 +411,7 @@ let tail_cmd =
   let follow =
     let doc = "keep waiting for new events to display." in
     Arg.(value & flag & info ["follow"] ~docv:"FOLLOW" ~doc) in
-  Term.(ret(pure tail $ common_options_t $ follow)),
+  Term.(ret(pure (translate2 tail) $ common_options_t $ follow)),
   Term.info "tail" ~sdocs:_common_options ~doc ~man
 
 let mscgen_cmd =
@@ -401,7 +420,7 @@ let mscgen_cmd =
     `S "DESCRIPTION";
     `P "Display the most recent trace events in mscgen input format, allowing message sequence charts to be rendered";
   ] @ help in
-  Term.(ret(pure mscgen $ common_options_t)),
+  Term.(ret(pure (translate1 mscgen) $ common_options_t)),
   Term.info "mscgen" ~sdocs:_common_options ~doc ~man
 
 let ack_cmd =
@@ -416,7 +435,7 @@ let ack_cmd =
   let id =
     let doc = "message id" in
     Arg.(value & pos 1 (some int64) None & info [] ~docv:"ACK" ~doc) in
-  Term.(ret(pure ack $ common_options_t $ qname $ id)),
+  Term.(ret(pure (translate3 ack) $ common_options_t $ qname $ id)),
   Term.info "ack" ~sdocs:_common_options ~doc ~man
 
 let destroy_cmd =
@@ -428,7 +447,7 @@ let destroy_cmd =
   let n =
     let doc = "queue name" in
     Arg.(value & pos 0 (some string) None & info [] ~docv:"QUEUE" ~doc) in
-  Term.(ret(pure destroy $ common_options_t $ n)),
+  Term.(ret(pure (translate2 destroy) $ common_options_t $ n)),
   Term.info "destroy" ~sdocs:_common_options ~doc ~man
 
 let string_of_ic ?end_marker ic =
@@ -444,7 +463,7 @@ let string_of_ic ?end_marker ic =
 
 let call common_options_t name body path timeout =
   match name with
-  | None -> `Error(true, "a queue name is required")
+  | None -> Error(true, "a queue name is required")
   | Some name ->
     begin
       let txt = match body, path with
@@ -465,7 +484,7 @@ let call common_options_t name body path timeout =
       Client.rpc ~t ?timeout ~queue:name ~body:txt ()
       >>|= fun result ->
       print_endline result;
-      `Ok ()
+      Ok ()
     end
 
 let call_cmd =
@@ -487,13 +506,13 @@ let call_cmd =
     let doc = "Time to wait for a response before failing." in
     Arg.(value & opt (some int) None & info ["timeout"] ~docv:"TIMEOUT" ~doc) in
 
-  Term.(ret(pure call $ common_options_t $ qname $ body $ path $ timeout)),
+  Term.(ret(pure (translate5 call) $ common_options_t $ qname $ body $ path $ timeout)),
   Term.info "call" ~sdocs:_common_options ~doc ~man
 
 let serve common_options_t name program =
   match name with
   | None ->
-    `Error(true, "a queue name is required")
+    Error(true, "a queue name is required")
   | Some name ->
     let _ = Protocol_unix.Server.listen ~process:(fun req ->
         match program with
@@ -527,7 +546,7 @@ let serve_cmd =
     let doc = "Path of the program to invoke on every call." in
     Arg.(value & opt (some file) None & info ["program"] ~doc) in
 
-  Term.(ret(pure serve $ common_options_t $ qname $ program)),
+  Term.(ret(pure (translate3 serve) $ common_options_t $ qname $ program)),
   Term.info "serve" ~sdocs:_common_options ~doc ~man
 
 let shutdown common_options_t =
@@ -535,7 +554,7 @@ let shutdown common_options_t =
   >>|= fun t ->
   Client.shutdown ~t ()
   >>|= fun () ->
-  `Ok ()
+  Ok ()
 
 let shutdown_cmd =
   let doc = "shut down the message switch" in
@@ -543,7 +562,7 @@ let shutdown_cmd =
     `S "DESCRIPTION";
     `P "Request that the message switch shut itself down cleanly.";
   ] @ help in
-  Term.(ret(pure shutdown $ common_options_t)),
+  Term.(ret(pure (translate1 shutdown) $ common_options_t)),
   Term.info "shutdown" ~sdocs:_common_options ~doc ~man
 
 let default_cmd =
