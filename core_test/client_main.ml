@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+open Rresult
 open Cohttp_lwt_unix
 open Lwt
 open Protocol
@@ -27,8 +28,8 @@ let shutdown = "shutdown"
 let nthreads = ref 1
 
 let (>>|=) m f = m >>= function
-  | `Ok x -> f x
-  | `Error y ->
+  | Ok x -> f x
+  | Error y ->
     let b = Buffer.create 16 in
     let fmt = Format.formatter_of_buffer b in
     Client.pp_error fmt y;
