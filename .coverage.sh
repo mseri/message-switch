@@ -14,7 +14,7 @@ opam pin add bisect_ppx 1.3.0 -y
 opam install ocveralls -y
 
 # install test deps
-opam install message-switch -t -v
+opam install message-switch-async cohttp-async -y
 
 export BISECT_ENABLE=YES
 jbuilder runtest
